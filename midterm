@@ -1,51 +1,51 @@
-###########################################################################
-# Paper: PMID 27667667
-# Data link (available in paper):
-# https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-5061
-###########################################################################
+library(Seurat)
+library(ggplot2)
+library(dplyr)
 
-# From E-MTAB-5061.idf.txt
-# Format of the datafile ‘pancreas_refseq_rpkms_counts_3514sc.txt’: 
-# The file contains both the normalized rpkm values and the raw read counts 
-# for each sample. Columns correspond to samples and rows to genes. 
-# The first line of the file (starting with: #samples) contains the sample IDs 
-# to be used as column labels for both the rpkm and counts.
-# The columns of the rpkm and the counts have the same order with the sample IDs.
-# Columns 1:3514 correspond to rpkm values, Columns 3515:7028 correspond to read counts.
-# Rows 1:26179 correspond to data for RefSeq genes, Rows 26180:26271 correspond 
-# to data for the 92 external RNA spike-in controls (ERCCs), 
-# Row 26272 (last) contains data for ‘eGFP’.
-
-cell.barcodes <- scan(text = readLines("data/E-MTAB-5061/pancreas_refseq_rpkms_counts_3514sc.txt", 1), 
+cell.barcodes <- scan(text = readLines("C:/Users/Weiyi/Downloads/E-MTAB-5061/pancreas_refseq_rpkms_counts_3514sc.txt", 1), 
                       what = "", quiet = TRUE)[-1] # 3514 cell barcodes
-count=read.table('data/E-MTAB-5061/pancreas_refseq_rpkms_counts_3514sc.txt',sep='\t')
-gene.meta=count[,1:2] # First two columns are gene symbols and IDs
+count=read.table('C:/Users/Weiyi/Downloads/E-MTAB-5061/pancreas_refseq_rpkms_counts_3514sc.txt',sep='\t')
+gene.meta=count[,1:2] 
 count=count[,-(1:2)]
-count=as.matrix(count[,3515:7028]) # Columns 3515:7028 correspond to read counts.
+count=as.matrix(count[,3515:7028]) 
 rownames(count)=gene.meta[,1]
 colnames(count)=cell.barcodes
-rm(gene.meta, cell.barcodes)
+rm(gene.meta, cell.barcodes
 
-cell.meta=read.csv('data/E-MTAB-5061/E-MTAB-5061.sdrf.txt',sep='\t')
-table(cell.meta$Characteristics..individual.) # Six healthy individuals, four T2D patients
-cell.meta=cell.meta[,1:5] # Remove unnecessary meta info for the cells
+cell.meta=read.csv('C:/Users/Weiyi/Downloads/E-MTAB-5061/E-MTAB-5061.sdrf.txt',sep='\t')
+table(cell.meta$Characteristics..individual.)
 
-# Hint:
-# 1. Need to reorder the cells to make them match between count and cell.meta
-# 2. Need to select the healthy individuals (and remove the T2D patients)
+cell.meta=cell.meta[,1:5]
+count=count[,match(cell.meta$Source.Name, colnames(count))]
+all(colnames(count)==cell.meta$Source.Name)
 
-###########################################################################
-# Paper: PMID 27667667
-# Data link (available in paper):
-# https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-5061
-###########################################################################
+dim(count); dim(cell.meta)
+count=count[unique(rownames(count)),]
+rownames(cell.meta)=cell.meta$Source.Name
 
-baron1=read.csv('data/GSE84133_RAW/GSM2230757_human1_umifm_counts.csv.gz')
-baron2=read.csv('data/GSE84133_RAW/GSM2230758_human2_umifm_counts.csv.gz')
-baron3=read.csv('data/GSE84133_RAW/GSM2230759_human3_umifm_counts.csv.gz')
-baron4=read.csv('data/GSE84133_RAW/GSM2230760_human4_umifm_counts.csv.gz')
+seger=CreateSeuratObject(counts = count, project = "seger", min.cells = 3, min.features = 200,
+                         meta.data = cell.meta)
+seger <- subset(seger, idents = c("HP1504101T2D", "HP1508501T2D", "HP1525301T2D", "HP1526901T2D"), invert = TRUE)
+rm(count, cell.meta)
 
-# Check that the columns are the same before combining rows
+seger <- NormalizeData(seger, normalization.method = "LogNormalize", scale.factor = 10000)
+seger <- FindVariableFeatures(seger, selection.method = "vst", nfeatures = 2000)
+seger <- ScaleData(seger, features = rownames(seger))
+seger <- RunPCA(seger, features = VariableFeatures(object = seger))
+ElbowPlot(seger)
+
+seger <- RunTSNE(seger, dims = 1:10)
+DimPlot(seger, group.by='Characteristics..individual.')
+
+FeaturePlot(seger, reduction = "tsne",features = c("KRT19","PRSS1","GCG",
+                                                        "INS","PPY","SST",
+                                                        "GHRL"), ncol = 4)
+
+baron1=read.csv('C:/Users/Weiyi/Downloads/GSE84133_RAW/GSM2230757_human1_umifm_counts.csv.gz')
+baron2=read.csv('C:/Users/Weiyi/Downloads/GSE84133_RAW/GSM2230758_human2_umifm_counts.csv.gz')
+baron3=read.csv('C:/Users/Weiyi/Downloads/GSE84133_RAW/GSM2230759_human3_umifm_counts.csv.gz')
+baron4=read.csv('C:/Users/Weiyi/Downloads/GSE84133_RAW/GSM2230760_human4_umifm_counts.csv.gz')
+
 all(colnames(baron1)==colnames(baron2))
 all(colnames(baron1)==colnames(baron3))
 all(colnames(baron1)==colnames(baron4))
@@ -60,3 +60,23 @@ rm(baron)
 rownames(count)=cell.meta$cell
 rownames(cell.meta)=cell.meta$cell
 colnames(cell.meta)[3]='celltype'
+
+baron=CreateSeuratObject(counts = t(count), project = "baron", min.cells = 3, min.features = 200,
+                         meta.data = cell.meta)
+rm(count, cell.meta)
+
+baron <- NormalizeData(baron, normalization.method = "LogNormalize", scale.factor = 10000)
+baron <- FindVariableFeatures(baron, selection.method = "vst", nfeatures = 2000)
+baron <- ScaleData(baron, features = rownames(baron))
+baron <- RunPCA(baron, features = VariableFeatures(object = baron))
+
+ElbowPlot(baron)
+baron <- RunTSNE(baron, dims = 1:10)
+DimPlot(baron, group.by='celltype', label=TRUE)
+
+DimPlot(baron, group.by='individual')
+FeaturePlot(baron,reduction = "tsne",features = c("KRT19","PRSS1","GCG",
+                                                           "INS","PPY","SST",
+                                                           "GHRL"), ncol = 4) 
+
+
