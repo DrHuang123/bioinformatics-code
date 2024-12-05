@@ -18,7 +18,7 @@ library(Signac)
 library(Seurat)
 library(ggplot2)
 library(patchwork)
-library(EnsDb.Mmusculus.v79) # mm10
+library(EnsDb.Mmusculus.v79) 
 
 ref_genome='mm10'
 ensdb=EnsDb.Mmusculus.v79
@@ -79,7 +79,7 @@ brain
 DefaultAssay(brain)='ATAC'
 brain <- RunTFIDF(brain)
 brain <- FindTopFeatures(brain, min.cutoff = 'q0')
-brain <- RunSVD(brain) # This by default returns an lsi reduction
+brain <- RunSVD(brain)
 
 brain <- RunUMAP(object = brain, reduction = 'lsi', dims = 2:30, reduction.name = 'lsi.umap', 
                 reduction.key='lsiumap_', verbose = FALSE)
