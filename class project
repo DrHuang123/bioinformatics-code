@@ -1,0 +1,142 @@
+library(qvalue)
+data(hedenfalk)
+pval=hedenfalk$p
+hist(pval)
+
+pval.Bonferroni=p.adjust(p = pval, method='bonferroni')
+pval.BH=p.adjust(p = pval, method='BH')
+pval.qvalue=qvalue(p=pval)$qvalues
+
+alpha=0.05
+sum(pval<alpha)
+
+sum(pval.Bonferroni<alpha)
+sum(pval.BH<alpha)
+sum(pval.qvalue<alpha)
+
+library(Signac)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(EnsDb.Mmusculus.v79) # mm10
+
+ref_genome='mm10'
+ensdb=EnsDb.Mmusculus.v79
+set.seed(1234)
+
+counts <- Read10X_h5(filename = "C:/Users/Weiyi/Downloads/atac_v1_adult_brain_fresh_5k_filtered_peak_bc_matrix.h5")
+
+metadata <- read.csv(
+  file = "C:/Users/Weiyi/Downloads/atac_v1_adult_brain_fresh_5k_singlecell.csv",
+  header = TRUE,
+  row.names = 1)
+
+chrom_assay <- CreateChromatinAssay(
+  counts = counts,
+  sep = c(":", "-"),
+  genome = ref_genome,
+  fragments = 'C:/Users/Weiyi/Downloads/atac_v1_adult_brain_fresh_5k_fragments.tsv.gz',
+  min.cells = 10,
+  min.features = 200)
+
+brain <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = "ATAC",
+  meta.data = metadata)
+
+brain[['ATAC']]
+
+rm(counts); rm(chrom_assay); rm(metadata)
+annotations <- GetGRangesFromEnsDb(ensdb = ensdb)
+seqlevelsStyle(annotations) <- 'UCSC'
+Annotation(brain) <- annotations
+rm(annotations)
+
+brain <- NucleosomeSignal(object = brain)
+brain <- TSSEnrichment(object = brain, fast = FALSE)
+brain$pct_reads_in_peaks <- brain$peak_region_fragments / brain$passed_filters * 100
+brain$blacklist_ratio <- brain$blacklist_region_fragments / brain$peak_region_fragments
+
+VlnPlot(
+  object = brain,
+  features = c('pct_reads_in_peaks', 'peak_region_fragments',
+               'TSS.enrichment', 'blacklist_ratio', 'nucleosome_signal'),
+  pt.size = 0.1,
+  ncol = 5
+)
+
+brain <- subset(
+  x = brain,
+  subset = peak_region_fragments > 3000 &
+    peak_region_fragments < 100000 &
+    pct_reads_in_peaks > 40 &
+    blacklist_ratio < 0.025 &
+    nucleosome_signal < 4 &
+    TSS.enrichment > 2
+)
+brain
+
+DefaultAssay(brain)='ATAC'
+brain <- RunTFIDF(brain)
+brain <- FindTopFeatures(brain, min.cutoff = 'q0')
+brain <- RunSVD(brain) # This by default returns an lsi reduction
+
+brain <- RunUMAP(object = brain, reduction = 'lsi', dims = 2:30, reduction.name = 'lsi.umap', 
+                reduction.key='lsiumap_', verbose = FALSE)
+brain <- FindNeighbors(object = brain, reduction = 'lsi', dims = 2:30)
+brain <- FindClusters(object = brain, verbose = FALSE, algorithm = 3)
+DimPlot(object = brain, label = TRUE, reduction = 'lsi.umap') + NoLegend()
+
+gene.activities <- GeneActivity(brain)
+brain[['ACTIVITY']] <- CreateAssayObject(counts = gene.activities)
+DefaultAssay(brain) <- "ACTIVITY"
+brain <- NormalizeData(
+  object = brain,
+  assay = 'ACTIVITY',
+  normalization.method = 'LogNormalize',
+  scale.factor = median(brain$nCount_ACTIVITY))
+
+brain <- FindVariableFeatures(brain, selection.method = "vst", nfeatures = 2000)
+brain <- ScaleData(brain, features = rownames(brain))
+brain <- RunPCA(brain, features = VariableFeatures(brain), 
+                reduction.name = 'activity.pca',  reduction.key = 'activitypca_', verbose = FALSE)
+brain <- RunUMAP(brain, dims = 1:30, reduction='activity.pca', 
+                 reduction.name='activity.umap', reduction.key = 'activityumap_', verbose = FALSE)
+
+rm(gene.activities)
+DimPlot(object = brain, label = TRUE, reduction = 'activity.umap') + NoLegend()
+
+dim(brain@assays$ACTIVITY@scale.data)
+dim(brain@reductions$activity.pca@cell.embeddings)
+
+brain_rna <- readRDS("data/allen_brain.rds")
+brain_rna <- UpdateSeuratObject(brain_rna)
+DefaultAssay(brain)='ACTIVITY'
+transfer.anchors <- FindTransferAnchors(
+  reference = brain_rna,
+  query = brain,
+  reduction = 'cca',
+  reference.assay = 'RNA',
+  query.assay = 'ACTIVITY')
+
+predicted.labels <- TransferData(
+  anchorset = transfer.anchors,
+  refdata = brain_rna$subclass,
+  weight.reduction = brain[['lsi']],
+  dims = 2:30)
+
+brain <- AddMetaData(object = brain, metadata = predicted.labels)
+plot1 <- DimPlot(
+  object = brain_rna,
+  group.by = 'subclass',
+  label = TRUE,
+  repel = TRUE) + NoLegend() + ggtitle('scRNA-seq')
+
+plot2 <- DimPlot(
+  object = brain,
+  group.by = 'predicted.id',
+  label = TRUE,
+  repel = TRUE) + NoLegend() + ggtitle('scATAC-seq')
+
+plot1 + plot2
+
